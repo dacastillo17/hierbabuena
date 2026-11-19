@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Realidad Aumentada - Hierbabuena y Flor</title>
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <script>
+    // Componente chroma key: quita el color indicado del video
+    AFRAME.registerComponent("chromakey", {
+      schema: {
+        src: { type: "selector" },
+        color: { type: "color", default: "#0000ff" },   // color a quitar
+        similarity: { type: "number", default: 0.25 },  // más alto = quita más azul
+        smoothness: { type: "number", default: 0.08 },  // suaviza los bordes
+        width: { type: "number", default: 1 },
+        height: { type: "number", default: 1.7 }
+      },
+
+      init: function () {
+        const d = this.data;
+        const video = d.src;
+
+        const texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        this.material = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          side: THREE.DoubleSide
+        });
+
+        this.material.onBeforeCompile = (shader) => {
+          shader.uniforms.keyColor = { value: new THREE.Color(d.color) };
+          shader.uniforms.similarity = { value: d.similarity };
+          shader.uniforms.smoothness = { value: d.smoothness };
+          this.shader = shader;
+
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              "#include <common>",
+              `#include <common>
+               uniform vec3 keyColor;
+               uniform float similarity;
+               uniform float smoothness;
+               vec2 rgb2uv(vec3 c) {
+                 return vec2(
+                   -0.169 * c.r - 0.331 * c.g + 0.5 * c.b,
+                    0.5 * c.r - 0.419 * c.g - 0.081 * c.b
+                 );
+               }`
+            )
+            .replace(
+              "#include <map_fragment>",
+              `#include <map_fragment>
+               float chromaDist = distance(rgb2uv(sampledDiffuseColor.rgb), rgb2uv(keyColor));
+               diffuseColor.a *= smoothstep(similarity, similarity + smoothness, chromaDist);
+               if (diffuseColor.a < 0.01) discard;`
+            );
+        };
+
+        this.mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(d.width, d.height),
+          this.material
+        );
+        this.el.setObject3D("mesh", this.mesh);
+      },
+
+      update: function () {
+        if (!this.shader) return;
+        this.shader.uniforms.keyColor.value.set(this.data.color);
+        this.shader.uniforms.similarity.value = this.data.similarity;
+        this.shader.uniforms.smoothness.value = this.data.smoothness;
+      }
+    });
+  </script>
+
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!--
+    maxTrack: 2 -> permite detectar las 2 imágenes a la vez
+    (si prefieres una sola a la vez, ponlo en 1)
+  -->
+  <a-scene
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; maxTrack: 2;"
+    color-space="sRGB"
+    renderer="colorManagement: true, physicallyCorrectLights: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+  >
+
+    <a-assets>
+      <!-- Video 1: hierbabuena (sin audio, con fondo azul) -->
+      <video
+        id="videoyerbabuena"
+        src="./videoyerbabuena.mp4"
+        preload="auto"
+        loop="true"
+        muted="true"
+        playsinline
+        webkit-playsinline
+        crossorigin="anonymous"
+      ></video>
+
+      <!-- Video 2: floranimacion (sin audio) -->
+      <video
+        id="videofloranimacion"
+        src="./floranimacion.mp4"
+        preload="auto"
+        loop="true"
+        muted="true"
+        playsinline
+        webkit-playsinline
+        crossorigin="anonymous"
+      ></video>
+    </a-assets>
+
+    <a-camera
+      position="0 0 0"
+      look-controls="enabled: false"
+    ></a-camera>
+
+    <!-- IMAGEN 1 (targetIndex 0) -> muestra videoyerbabuena -->
+    <a-entity
+      mindar-image-target="targetIndex: 0"
+      id="mundoyerbabuena"
+    >
